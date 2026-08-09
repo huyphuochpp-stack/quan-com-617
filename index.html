@@ -1,8 +1,154 @@
 <!DOCTYPE html>
 <html>
 <head>
-<base target="_top">
+<script>
+(function(){
+  var BRIDGE_URL="https://script.google.com/macros/s/AKfycbzAjzsri3r_hSgQOZQKdFkYAUiVPbNephQ-syLEOxgYO5nAmsjSxJGLXGk488QmCz2q/exec?bridge=1";
+  var frame=null,ready=false,readyWaiters=[],pending={},seq=0;
+
+  function createBridge(){
+    if(frame)return;
+    frame=document.createElement("iframe");
+    frame.src=BRIDGE_URL;
+    frame.setAttribute("aria-hidden","true");
+    frame.style.position="fixed";
+    frame.style.width="1px";
+    frame.style.height="1px";
+    frame.style.border="0";
+    frame.style.opacity="0";
+    frame.style.pointerEvents="none";
+    frame.style.left="-10px";
+    frame.style.top="-10px";
+    document.body.appendChild(frame);
+  }
+
+  function waitReady(){
+    if(ready)return Promise.resolve();
+    createBridge();
+    return new Promise(function(resolve,reject){
+      readyWaiters.push({resolve:resolve,reject:reject});
+      setTimeout(function(){
+        if(!ready){
+          var list=readyWaiters.splice(0);
+          list.forEach(function(x){
+            x.reject(new Error("Không kết nối được máy chủ Google Apps Script."));
+          });
+        }
+      },20000);
+    });
+  }
+
+  window.addEventListener("message",function(event){
+    if(!frame || event.source!==frame.contentWindow)return;
+    var d=event.data||{};
+
+    if(d.type==="quancom617-bridge-ready"){
+      ready=true;
+      var list=readyWaiters.splice(0);
+      list.forEach(function(x){x.resolve();});
+      return;
+    }
+
+    if(d.type==="quancom617-bridge-response"){
+      var p=pending[d.id];
+      if(!p)return;
+      delete pending[d.id];
+      if(d.ok)p.resolve(d.result);
+      else p.reject(new Error(d.error||"Lỗi máy chủ."));
+    }
+  });
+
+  function bridgeCall(method,args,token){
+    return waitReady().then(function(){
+      return new Promise(function(resolve,reject){
+        var id="q617_"+(++seq)+"_"+Date.now();
+        pending[id]={resolve:resolve,reject:reject};
+
+        try{
+          frame.contentWindow.postMessage({
+            type:"quancom617-bridge-request",
+            id:id,
+            method:method,
+            args:Array.isArray(args)?args:[],
+            token:token||""
+          },"*");
+        }catch(e){
+          delete pending[id];
+          reject(e);
+        }
+
+        setTimeout(function(){
+          if(pending[id]){
+            delete pending[id];
+            reject(new Error("Máy chủ phản hồi quá lâu."));
+          }
+        },30000);
+      });
+    });
+  }
+
+  function makeRunner(){
+    var successHandler=null,failureHandler=null,runner={};
+
+    runner.withSuccessHandler=function(fn){
+      successHandler=typeof fn==="function"?fn:null;
+      return runner;
+    };
+
+    runner.withFailureHandler=function(fn){
+      failureHandler=typeof fn==="function"?fn:null;
+      return runner;
+    };
+
+    [
+      "checkLogin",
+      "createRememberedSession",
+      "validateRememberedSession",
+      "destroyRememberedSession",
+      "getMenuData",
+      "getCustomerData",
+      "saveCustomer",
+      "saveBill",
+      "saveExpenseData",
+      "getReportData"
+    ].forEach(function(method){
+      runner[method]=function(){
+        var args=Array.prototype.slice.call(arguments);
+        var token=localStorage.getItem("loginToken")||"";
+
+        bridgeCall(method,args,token)
+          .then(function(result){
+            if(successHandler)successHandler(result);
+          })
+          .catch(function(error){
+            if(failureHandler)failureHandler(error);
+            else console.error(error);
+          });
+
+        return runner;
+      };
+    });
+
+    return runner;
+  }
+
+  window.google=window.google||{};
+  window.google.script=window.google.script||{};
+
+  Object.defineProperty(window.google.script,"run",{
+    configurable:true,
+    get:function(){return makeRunner();}
+  });
+})();
+</script>
+
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0b74c7">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Quán Cơm 617">
 <title>Quản Lý Quán Cơm 617</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
@@ -46,49 +192,6 @@ body *{visibility:hidden!important}
 .separator{border-top:1px dashed #000;margin:5px 0}.total-label{text-align:right;padding-right:8px!important}.total-value{text-align:right;white-space:nowrap}.grand-total{font-size:14px;font-weight:bold}.thank-you{text-align:center;margin-top:12px;font-style:italic}
 }
 </style>
-
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#0b74c7">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Quán Cơm 617">
-
-<script>
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzAjzsri3r_hSgQOZQKdFkYAUiVPbNephQ-syLEOxgYO5nAmsjSxJGLXGk488QmCz2q/exec";
-
-async function apiCall(action, data={}, token=getStoredToken()) {
-  const r=await fetch(APPS_SCRIPT_URL,{
-    method:"POST",
-    headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({action:action,data:data,token:token})
-  });
-  if(!r.ok) throw new Error("Không kết nối được máy chủ.");
-  return await r.json();
-}
-function getStoredToken(){return localStorage.getItem("quancom617_token")||"";}
-function saveStoredSession(r){
-  localStorage.setItem("quancom617_token",r.token||"");
-  localStorage.setItem("userName",r.username||"");
-  localStorage.setItem("userRole",r.role||"");
-}
-function clearStoredSession(){
-  localStorage.removeItem("quancom617_token");
-  localStorage.removeItem("userName");
-  localStorage.removeItem("userRole");
-}
-function showWebNotice(message,type="success"){
-  let b=document.getElementById("webNotice");
-  if(!b){b=document.createElement("div");b.id="webNotice";
-    b.style.cssText="position:fixed;right:20px;top:20px;z-index:99999;padding:12px 16px;border-radius:12px;color:#fff;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.18);font-family:Arial,sans-serif;";
-    document.body.appendChild(b);}
-  b.style.background=type==="error"?"#dc3545":"#198754";
-  b.textContent=message;b.style.display="block";
-  clearTimeout(window.__noticeTimer);
-  window.__noticeTimer=setTimeout(()=>b.style.display="none",3000);
-}
-</script>
-
 </head>
 <body>
 
@@ -312,21 +415,17 @@ function processLogin(){
  var u=document.getElementById("txtUsername").value.trim(),p=document.getElementById("txtPassword").value,b=document.getElementById("btnLogin"),a=document.getElementById("login-alert");
  if(!u||!p){a.innerText="Vui lòng nhập đầy đủ thông tin!";a.classList.remove("d-none");return}
  b.disabled=true;b.innerText="ĐANG ĐĂNG NHẬP...";
- apiCall("login",{username:u,password:p},"").then(r=>{if(r.success)function(r){
+ google.script.run.withSuccessHandler(function(r){
    if(!r||!r.success){a.innerText=r&&r.message?r.message:"Đăng nhập thất bại.";a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập";return}
-   apiCall("saveExpenseData",{date:d,category:c,amount:a,note:n,staff:localStorage.getItem("userName")||"Quán Cơm 617"})
-}
-
-function changeReportFilter(){var x=document.getElementById("reportFilter").value,s=document.getElementById("reportStartBox"),e=document.getElementById("reportEndBox").then(r=>{if(r.success)function(session){
+   google.script.run.withSuccessHandler(function(session){
      if(!session||!session.success){a.innerText="Không tạo được phiên đăng nhập. Vui lòng thử lại.";a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập";return}
      saveLoginSession(session).then(function(){
        openApp(session.username,session.role);
        b.disabled=false;b.innerText="Đăng Nhập";
        document.getElementById("txtPassword").value="";
      });
-   }(r);else function(e){a.innerText="❌ "+(e.message||e);a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập"}).createRememberedSession(r.username);
- }).withFailureHandler(function(e){a.innerText="❌ "+(e.message||e);a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập"}(new Error(r.message));}).catch(function(e){a.innerText="❌ "+(e.message||e);a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập"}).createRememberedSession(r.username);
- }).withFailureHandler(function(e){a.innerText="❌ "+(e.message||e);a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập"});
+   }).withFailureHandler(function(e){a.innerText="❌ "+(e.message||e);a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập"}).createRememberedSession(r.username);
+ }).withFailureHandler(function(e){a.innerText="❌ "+(e.message||e);a.classList.remove("d-none");b.disabled=false;b.innerText="Đăng Nhập"}).checkLogin(u,p);
 }
 
 async function restoreLoginSession(){
@@ -620,7 +719,10 @@ function submitExpense(){
  var d=document.getElementById("expDate").value,c=document.getElementById("expCategory").value,a=Number(document.getElementById("expAmount").value),n=document.getElementById("expNote").value,b=document.getElementById("btnSaveExpense"),toast=document.getElementById("expenseSuccessToast");
  if(!d){alert("Vui lòng chọn ngày chi!");return}if(!a||a<=0){alert("Vui lòng nhập số tiền hợp lệ!");return}
  b.disabled=true;b.innerText="ĐANG LƯU DỮ LIỆU...";
- google.script.run.withSuccessHandler(function(){document.getElementById("expAmount").value="";document.getElementById("expNote").value="";todayExpense();toast.classList.add("show");setTimeout(function(){toast.classList.remove("show")},2000);b.disabled=false;b.innerText="LƯU CHI PHÍ";document.getElementById("expAmount").focus()}).withFailureHandler(function(e){alert("❌ "+(e.message||e));b.disabled=false;b.innerText="LƯU CHI PHÍ"}(r.data);else showWebNotice(r.message,"error");}).catch(e=>showWebNotice(e.message,"error"));if(x==="custom"){s.style.display="block";e.style.display="block";var d=new Date(),v=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");document.getElementById("reportStartDate").value=v;document.getElementById("reportEndDate").value=v}else{s.style.display="none";e.style.display="none"}}
+ google.script.run.withSuccessHandler(function(){document.getElementById("expAmount").value="";document.getElementById("expNote").value="";todayExpense();toast.classList.add("show");setTimeout(function(){toast.classList.remove("show")},2000);b.disabled=false;b.innerText="LƯU CHI PHÍ";document.getElementById("expAmount").focus()}).withFailureHandler(function(e){alert("❌ "+(e.message||e));b.disabled=false;b.innerText="LƯU CHI PHÍ"}).saveExpenseData({date:d,category:c,amount:a,note:n,staff:localStorage.getItem("userName")||"Quán Cơm 617"})
+}
+
+function changeReportFilter(){var x=document.getElementById("reportFilter").value,s=document.getElementById("reportStartBox"),e=document.getElementById("reportEndBox");if(x==="custom"){s.style.display="block";e.style.display="block";var d=new Date(),v=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");document.getElementById("reportStartDate").value=v;document.getElementById("reportEndDate").value=v}else{s.style.display="none";e.style.display="none"}}
 function loadReport(){
  if(localStorage.getItem("userRole")!=="QuanLy"){alert("❌ Bạn không có quyền truy cập Báo cáo.");return}
  var type=document.getElementById("reportFilter").value,f={type:type};if(type==="custom"){f.start=document.getElementById("reportStartDate").value;f.end=document.getElementById("reportEndDate").value;if(!f.start||!f.end){alert("Vui lòng chọn đầy đủ ngày.");return}}
@@ -649,11 +751,14 @@ window.addEventListener("load",function(){
 });
 </script>
 <div id="print-section"></div>
-
 <script>
-if("serviceWorker" in navigator){
- window.addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js").catch(console.warn));
-}
+window.addEventListener("load",function(){
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("./service-worker.js").catch(function(e){
+      console.warn("PWA service worker:",e);
+    });
+  }
+});
 </script>
 </body>
-</html>
+</html
