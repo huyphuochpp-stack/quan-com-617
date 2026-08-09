@@ -38,20 +38,75 @@
     });
   }
 
-  window.addEventListener("message",function(event){
-    if(!frame || event.source!==frame.contentWindow)return;
-    var d=event.data||{};
+window.addEventListener("message", function(event){
 
-    if(d.type==="quancom617-bridge-ready"){
-      ready=true;
-      var list=readyWaiters.splice(0);
-      list.forEach(function(x){x.resolve();});
-      return;
+    var d = event.data || {};
+
+    if (!d || !d.type) {
+        return;
     }
 
-    if(d.type==="quancom617-bridge-response"){
-      var p=pending[d.id];
-      if(!p)return;
+
+    // ==========================================
+    // BRIDGE ĐÃ SẴN SÀNG
+    // ==========================================
+
+    if (d.type === "quancom617-bridge-ready") {
+
+        console.log(
+            "✅ Google Apps Script Bridge đã kết nối"
+        );
+
+        ready = true;
+
+        var list =
+            readyWaiters.splice(0);
+
+        list.forEach(function(x){
+            x.resolve();
+        });
+
+        return;
+    }
+
+
+    // ==========================================
+    // NHẬN KẾT QUẢ TỪ GOOGLE APPS SCRIPT
+    // ==========================================
+
+    if (d.type === "quancom617-bridge-response") {
+
+        var p =
+            pending[d.id];
+
+        if (!p) {
+            return;
+        }
+
+        delete pending[d.id];
+
+
+        if (d.ok) {
+
+            p.resolve(
+                d.result
+            );
+
+        } else {
+
+            p.reject(
+                new Error(
+                    d.error ||
+                    "Lỗi Google Apps Script"
+                )
+            );
+
+        }
+
+        return;
+    }
+
+});
       delete pending[d.id];
       if(d.ok)p.resolve(d.result);
       else p.reject(new Error(d.error||"Lỗi máy chủ."));
